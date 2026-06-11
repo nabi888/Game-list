@@ -165,6 +165,19 @@
   .opt-row .del { background: transparent; border-color: transparent; color: var(--danger); padding: 2px 8px; }
   .opt-row .del:hover { border-color: var(--danger); }
 
+  /* 詳細表示 */
+  .detail-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .detail-head h2 { margin: 0; flex: 1; font-size: 18px; word-break: break-word; }
+  .detail-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+  .detail-actions button { padding: 6px 12px; font-size: 13px; }
+  .detail-row { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .detail-label { flex: 0 0 96px; color: var(--muted); font-size: 12px; padding-top: 2px; }
+  .detail-value { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+  .detail-value.empty { color: var(--muted); }
+  /* 参考サイト：詳細では最大5行、超過分はスクロール */
+  .ref-list { max-height: 8.6em; overflow: auto; }
+  .ref-item { line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: var(--panel2); border: 1px solid var(--accent);
@@ -211,6 +224,21 @@
       <button class="btn-ghost" id="cancelEdit">キャンセル</button>
       <button class="btn-primary" id="saveEdit">保存</button>
     </div>
+  </div>
+</div>
+
+<!-- 詳細表示モーダル -->
+<div class="overlay" id="detailOverlay">
+  <div class="modal">
+    <div class="detail-head">
+      <h2 id="detailTitle"></h2>
+      <div class="detail-actions">
+        <button class="btn-danger" id="detailDelete">削除</button>
+        <button class="btn-primary" id="detailEdit">編集</button>
+        <button class="btn-ghost" id="detailClose" title="閉じる">✕</button>
+      </div>
+    </div>
+    <div id="detailBody"></div>
   </div>
 </div>
 
@@ -272,7 +300,8 @@ const FIXED_COLUMNS = [
   { key: "platform",     label: "プラットフォーム",    type: "datalist" },
   { key: "genre",        label: "ジャンル",            type: "datalist" },
   { key: "status",       label: "ステータス",          type: "status" },
-  { key: "nextTodo",     label: "次にやること",        type: "textarea" },
+  { key: "nextTodo",     label: "メモ",                type: "textarea" },
+  { key: "refs",         label: "参考サイト",          type: "refs" },
   { key: "playtime",     label: "プレイ時間",          type: "number" },
   { key: "clearDate",    label: "クリア日",            type: "date" },
   { key: "purchaseDate", label: "購入日",              type: "date" },
@@ -281,7 +310,7 @@ const FIXED_COLUMNS = [
 
 // タイトル以降の既定の並び順（key／任意列は "x:名前"）。updatedAt は常に末尾。
 const DEFAULT_ORDER = [
-  "series", "platform", "genre", "status", "nextTodo",
+  "series", "platform", "genre", "status", "nextTodo", "refs",
   "x:ルート", "x:主人公", "playtime", "clearDate", "purchaseDate",
 ];
 
@@ -327,12 +356,13 @@ function getOptions(field) {
 // 新規データの初期値（任意追加項目の name と入力タイプ）
 function freshData() {
   return {
-    v: 4,
+    v: 5,
     customColumns: [
       { name: "ルート", type: "text" },
       { name: "主人公", type: "text" },
     ],
     hiddenColumns: [],
+    labels: {},
     games: [],
   };
 }
@@ -397,8 +427,20 @@ function migrate(d) {
     }
     d.v = 4;
   }
-  // 非表示列リストの初期化
+  // v5：参考サイト列を追加し、メモ（旧「次にやること」）の直後に配置。
+  // 標準列の表示名カスタム（labels）も導入。
+  if (!d.v || d.v < 5) {
+    if (!d.labels) d.labels = {};
+    if (Array.isArray(d.order) && !d.order.includes("refs")) {
+      const at = d.order.indexOf("nextTodo");
+      if (at >= 0) d.order.splice(at + 1, 0, "refs");
+      else d.order.push("refs");
+    }
+    d.v = 5;
+  }
+  // 非表示列リスト・表示名カスタムの初期化
   if (!Array.isArray(d.hiddenColumns)) d.hiddenColumns = [];
+  if (!d.labels || typeof d.labels !== "object") d.labels = {};
   return d;
 }
 
@@ -449,8 +491,14 @@ let searchText = "";
 let filterStatus = "";
 
 // 全列の定義を返す。先頭は常に「タイトル」、以降は data.order の並び順。
+// 標準列の表示名（ユーザーが「列の管理」で変更した名前があればそれを使う）
+function colLabel(key, fallback) {
+  return (data.labels && data.labels[key]) || fallback;
+}
+
 function allColumns() {
-  const cols = [FIXED_COLUMNS.find(c => c.key === "title")];
+  const titleFc = FIXED_COLUMNS.find(c => c.key === "title");
+  const cols = [{ ...titleFc, label: colLabel("title", titleFc.label) }];
   for (const key of data.order) {
     if (key.startsWith("x:")) {
       const name = key.slice(2);
@@ -458,7 +506,7 @@ function allColumns() {
       if (cc) cols.push({ key, label: name, type: cc.type || "text", custom: true });
     } else {
       const fc = FIXED_COLUMNS.find(c => c.key === key);
-      if (fc) cols.push(fc);
+      if (fc) cols.push({ ...fc, label: colLabel(fc.key, fc.label) });
     }
   }
   return cols;
@@ -486,6 +534,40 @@ function fmtDateTime(iso) {
   return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// ---- 参考サイト ----
+// 1行 = 1サイト。先頭トークンを URL、残りをページ名（任意）とみなす。
+function parseRef(line) {
+  const s = (line || "").trim();
+  if (!s) return null;
+  const sp = s.search(/\s/);
+  const url = sp === -1 ? s : s.slice(0, sp);
+  const page = sp === -1 ? "" : s.slice(sp + 1).trim();
+  return { url, page };
+}
+// URL からサイト名（ドメインの www. を除いたもの）を作る
+function siteName(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch (e) { return url; }
+}
+// リンクの表示テキスト：ページ名あり→「サイト名_ページ名」、なし→URLそのまま。長い場合は末尾省略。
+function refLabel(ref) {
+  const text = ref.page ? siteName(ref.url) + "_" + ref.page : ref.url;
+  return text.length > 30 ? text.slice(0, 30) + "…" : text;
+}
+function makeRefLink(ref) {
+  const a = document.createElement("a");
+  a.href = ref.url;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = refLabel(ref);
+  a.title = ref.url;
+  a.onclick = e => e.stopPropagation(); // 行クリック（詳細表示）と分離
+  return a;
+}
+function refLines(raw) {
+  return String(raw || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+}
+
 // ---- 一覧描画 ----
 // 絞り込み・並べ替え済みの行を返す
 function getRows(cols) {
@@ -493,7 +575,7 @@ function getRows(cols) {
   const q = searchText.trim().toLowerCase();
   if (q) {
     rows = rows.filter(g => {
-      const hay = [g.title, g.platform, g.series, g.genre, g.status, g.nextTodo,
+      const hay = [g.title, g.platform, g.series, g.genre, g.status, g.nextTodo, g.refs,
         ...Object.values(g.extra || {})].join(" ").toLowerCase();
       return hay.includes(q);
     });
@@ -567,11 +649,14 @@ function renderTable(cols, rows) {
   body.innerHTML = "";
   for (const g of rows) {
     const tr = document.createElement("tr");
-    tr.onclick = () => openEdit(g.id);
+    tr.onclick = () => openDetail(g.id);
     for (const col of cols) {
       const td = document.createElement("td");
       if (col.key === "status") {
         if (g.status) td.appendChild(statusPill(g.status));
+      } else if (col.key === "refs") {
+        const first = refLines(getValue(g, col))[0];
+        if (first) td.appendChild(makeRefLink(parseRef(first)));
       } else if (col.key === "updatedAt") {
         td.textContent = fmtDateTime(g.updatedAt);
         td.className = "muted";
@@ -626,6 +711,67 @@ function suggestionsFor(key) {
   return [...set].sort();
 }
 
+// ---- 詳細表示モーダル ----
+let detailId = null;
+
+function openDetail(id) {
+  const g = data.games.find(x => x.id === id);
+  if (!g) return;
+  detailId = id;
+  document.getElementById("detailTitle").textContent = g.title || "（無題）";
+
+  const body = document.getElementById("detailBody");
+  body.innerHTML = "";
+  for (const col of allColumns()) {
+    if (col.key === "title") continue; // タイトルは見出しに表示済み
+    const row = document.createElement("div");
+    row.className = "detail-row";
+    const lab = document.createElement("div");
+    lab.className = "detail-label";
+    lab.textContent = col.label;
+    const val = document.createElement("div");
+    val.className = "detail-value";
+    fillDetailValue(val, g, col);
+    row.append(lab, val);
+    body.appendChild(row);
+  }
+  document.getElementById("detailOverlay").classList.add("open");
+}
+
+function fillDetailValue(el, g, col) {
+  if (col.key === "status") {
+    if (g.status) el.appendChild(statusPill(g.status));
+    else { el.classList.add("empty"); el.textContent = "—"; }
+    return;
+  }
+  if (col.key === "updatedAt") {
+    el.textContent = fmtDateTime(g.updatedAt) || "—";
+    return;
+  }
+  if (col.key === "refs") {
+    const lines = refLines(getValue(g, col));
+    if (!lines.length) { el.classList.add("empty"); el.textContent = "—"; return; }
+    const box = document.createElement("div");
+    box.className = "ref-list";
+    for (const line of lines) {
+      const item = document.createElement("div");
+      item.className = "ref-item";
+      item.appendChild(makeRefLink(parseRef(line)));
+      box.appendChild(item);
+    }
+    el.appendChild(box);
+    return;
+  }
+  const v = getValue(g, col);
+  if (v === "" || v == null) { el.classList.add("empty"); el.textContent = "—"; }
+  else el.textContent = v;
+}
+
+function closeDetail() {
+  document.getElementById("detailOverlay").classList.remove("open");
+  detailId = null;
+}
+
 // ---- 追加・編集モーダル ----
 let editingId = null;
 
@@ -664,6 +810,11 @@ function openEdit(id) {
     } else if (f.type === "textarea") {
       input = document.createElement("textarea");
       input.value = val;
+    } else if (f.type === "refs") {
+      input = document.createElement("textarea");
+      input.value = val;
+      input.placeholder = "1行に1サイト：URL の後ろに半角スペースを空けてページ名（ページ名は省略可）\n例: https://www.4gamer.net/games/123/ 攻略チャート1";
+      input.rows = 4;
     } else if (f.type === "date") {
       input = document.createElement("input");
       input.type = "date";
@@ -690,7 +841,7 @@ function openEdit(id) {
       input.type = "number";
       input.step = "any"; input.min = "0";
       input.value = val;
-      input.placeholder = f.label === "プレイ時間" ? "時間（例：35）" : "";
+      input.placeholder = f.key === "playtime" ? "時間（例：35）" : "";
     } else {
       input = document.createElement("input");
       input.type = "text";
@@ -767,10 +918,20 @@ function renderColsList() {
   const list = document.getElementById("colsList");
   list.innerHTML = "";
 
-  // タイトル（常に先頭・固定）
+  // タイトル（常に先頭・固定。表示名のみ変更可能）
+  const titleFc = FIXED_COLUMNS.find(c => c.key === "title");
   const titleRow = document.createElement("div");
   titleRow.className = "col-row fixed";
-  titleRow.innerHTML = `<span class="name">タイトル</span><span class="muted">先頭固定</span>`;
+  const titleName = document.createElement("span");
+  titleName.className = "name";
+  titleName.textContent = colLabel("title", titleFc.label);
+  const titleTag = document.createElement("span");
+  titleTag.className = "muted"; titleTag.style.fontSize = "12px";
+  titleTag.textContent = "先頭固定";
+  const titleRen = document.createElement("button");
+  titleRen.className = "btn-ghost"; titleRen.textContent = "名前変更";
+  titleRen.onclick = () => renameFixed("title", colLabel("title", titleFc.label));
+  titleRow.append(titleName, titleTag, titleRen);
   list.appendChild(titleRow);
 
   // タイトル以降（並び替え可能）
@@ -778,7 +939,7 @@ function renderColsList() {
     const isCustom = key.startsWith("x:");
     const cc = isCustom ? data.customColumns.find(c => c.name === key.slice(2)) : null;
     const fc = !isCustom ? FIXED_COLUMNS.find(c => c.key === key) : null;
-    const label = isCustom ? cc.name : fc.label;
+    const label = isCustom ? cc.name : colLabel(fc.key, fc.label);
     const type = isCustom ? (cc.type || "text") : fc.type;
 
     const row = document.createElement("div");
@@ -820,6 +981,12 @@ function renderColsList() {
       del.className = "btn-danger"; del.textContent = "削除";
       del.onclick = () => deleteCol(key.slice(2));
       row.append(ren, del);
+    } else {
+      // 標準項目：表示名のみ変更可能（削除は不可）
+      const ren = document.createElement("button");
+      ren.className = "btn-ghost"; ren.textContent = "名前変更";
+      ren.onclick = () => renameFixed(key, label);
+      row.append(ren);
     }
     list.appendChild(row);
   });
@@ -829,12 +996,26 @@ function addCol() {
   const typeSel = document.getElementById("newColType");
   const name = inp.value.trim();
   if (!name) return;
-  if (FIXED_COLUMNS.some(c => c.label === name) || data.customColumns.some(c => c.name === name)) {
+  if (allColumns().some(c => c.label === name) || data.customColumns.some(c => c.name === name)) {
     showToast("同じ名前の項目があります"); return;
   }
   data.customColumns.push({ name, type: typeSel.value || "text" });
   normalizeOrder();
   inp.value = "";
+  save(); renderColsList(); render();
+}
+// 標準項目の表示名を変更（内部キーは変えず、data.labels に上書きを保存）
+function renameFixed(key, current) {
+  const name = prompt("新しい表示名", current);
+  if (name == null) return;
+  const t = name.trim();
+  if (!t || t === current) return;
+  const used = allColumns().filter(c => c.key !== key).map(c => c.label);
+  if (used.includes(t) || data.customColumns.some(c => c.name === t)) {
+    showToast("同じ名前の項目があります"); return;
+  }
+  data.labels = data.labels || {};
+  data.labels[key] = t;
   save(); renderColsList(); render();
 }
 function renameCol(old) {
@@ -844,7 +1025,7 @@ function renameCol(old) {
   if (!name) return;
   const t = name.trim();
   if (!t || t === old) return;
-  if (FIXED_COLUMNS.some(c => c.label === t) || data.customColumns.some(c => c.name === t)) {
+  if (allColumns().some(c => c.label === t) || data.customColumns.some(c => c.name === t)) {
     showToast("同じ名前の項目があります"); return;
   }
   cc.name = t;
@@ -982,6 +1163,9 @@ function showToast(msg) {
 
 // ---- イベント ----
 document.getElementById("addBtn").onclick = () => openEdit(null);
+document.getElementById("detailClose").onclick = closeDetail;
+document.getElementById("detailEdit").onclick = () => { const id = detailId; closeDetail(); openEdit(id); };
+document.getElementById("detailDelete").onclick = () => { const id = detailId; closeDetail(); removeGame(id); };
 document.getElementById("saveEdit").onclick = saveEdit;
 document.getElementById("cancelEdit").onclick = closeEdit;
 document.getElementById("deleteBtn").onclick = () => removeGame(editingId);
