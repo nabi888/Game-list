@@ -146,6 +146,8 @@
   }
   .col-row .name { flex: 1; }
   .col-row.fixed .name { color: var(--muted); }
+  .col-row.hidden .name { color: var(--muted); text-decoration: line-through; }
+  .col-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .col-row button { font-size: 12px; padding: 3px 9px; }
   .col-row .ord { background: transparent; border: 1px solid var(--line); padding: 3px 8px; line-height: 1; }
   .col-row .ord:disabled { opacity: .3; cursor: default; }
@@ -238,7 +240,7 @@
 <div class="overlay" id="colsOverlay">
   <div class="modal">
     <h2>列（項目）の管理</h2>
-    <p class="muted" style="margin-top:0;font-size:12px">「タイトル」より下の項目は ▲▼ で並び順を変更できます。任意項目は名前変更・削除も可能です。</p>
+    <p class="muted" style="margin-top:0;font-size:12px">「タイトル」より下の項目は ▲▼ で並び順を変更できます。左のチェックで一覧の <b>表示／非表示</b> を切り替え（データは残ります）。任意項目は名前変更・削除も可能です。</p>
     <div id="colsList"></div>
     <div class="add-col">
       <input id="newColName" type="text" placeholder="新しい項目名（例：難易度、おすすめ度…）">
@@ -262,16 +264,25 @@
 
 const STORAGE_KEY = "game-progress-tracker-v1";
 
-// 標準項目（固定・順番もこの通り）。key はデータ保存用、label は表示名。
+// 標準項目（固定）。key はデータ保存用、label は表示名。
+// 既定の並び順は DEFAULT_ORDER で定義する（title は常に先頭、updatedAt は常に末尾）。
 const FIXED_COLUMNS = [
   { key: "title",        label: "タイトル",            type: "text" },
-  { key: "platform",     label: "プラットフォーム",    type: "datalist" },
-  { key: "purchaseDate", label: "購入日",              type: "date" },
   { key: "series",       label: "シリーズ",            type: "text" },
+  { key: "platform",     label: "プラットフォーム",    type: "datalist" },
   { key: "genre",        label: "ジャンル",            type: "datalist" },
   { key: "status",       label: "ステータス",          type: "status" },
   { key: "nextTodo",     label: "次にやること",        type: "textarea" },
+  { key: "playtime",     label: "プレイ時間",          type: "number" },
+  { key: "clearDate",    label: "クリア日",            type: "date" },
+  { key: "purchaseDate", label: "購入日",              type: "date" },
   { key: "updatedAt",    label: "更新日時",            type: "auto" },
+];
+
+// タイトル以降の既定の並び順（key／任意列は "x:名前"）。updatedAt は常に末尾。
+const DEFAULT_ORDER = [
+  "series", "platform", "genre", "status", "nextTodo",
+  "x:ルート", "x:主人公", "playtime", "clearDate", "purchaseDate",
 ];
 
 const STATUS_OPTIONS = ["未プレイ", "積みゲー", "プレイ中", "中断", "クリア", "やり込み中", "コンプリート"];
@@ -313,25 +324,21 @@ function getOptions(field) {
 }
 
 // ---- データ読み込み ----
-function loadData() {
-  let d = null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) d = JSON.parse(raw);
-  } catch (e) { console.error(e); }
-  if (!d) {
-    // 新規：任意追加項目の初期値（name と入力タイプ）
-    d = {
-      v: 2,
-      customColumns: [
-        { name: "ルート",     type: "text" },
-        { name: "主人公",     type: "text" },
-        { name: "プレイ時間", type: "number" },
-        { name: "クリア日",   type: "date" },
-      ],
-      games: [],
-    };
-  }
+// 新規データの初期値（任意追加項目の name と入力タイプ）
+function freshData() {
+  return {
+    v: 4,
+    customColumns: [
+      { name: "ルート", type: "text" },
+      { name: "主人公", type: "text" },
+    ],
+    hiddenColumns: [],
+    games: [],
+  };
+}
+
+// 旧データを最新形式へ移行・正規化する（loadData / importData 共通）
+function migrate(d) {
   // v2 への移行（旧データ）
   if (!d.v || d.v < 2) {
     // 任意項目：文字列 → {name, type} へ変換
@@ -365,15 +372,56 @@ function loadData() {
     d.options.platform = merged;
     d.v = 3;
   }
+  // v4：プレイ時間・クリア日を任意項目から標準項目へ昇格。
+  // 各ゲームの extra に入っていた値を標準フィールド（playtime / clearDate）へ移し、
+  // 任意項目の定義と並び順キーを置き換える。
+  if (!d.v || d.v < 4) {
+    const moves = [
+      { name: "プレイ時間", key: "playtime" },
+      { name: "クリア日",   key: "clearDate" },
+    ];
+    for (const g of d.games || []) {
+      if (!g.extra) continue;
+      for (const m of moves) {
+        if (m.name in g.extra) {
+          if (g[m.key] === undefined || g[m.key] === "") g[m.key] = g.extra[m.name];
+          delete g.extra[m.name];
+        }
+      }
+    }
+    const moveNames = new Set(moves.map(m => m.name));
+    d.customColumns = (d.customColumns || []).filter(c => !moveNames.has(c.name));
+    if (Array.isArray(d.order)) {
+      const keyOf = { "x:プレイ時間": "playtime", "x:クリア日": "clearDate" };
+      d.order = d.order.map(k => keyOf[k] || k);
+    }
+    d.v = 4;
+  }
+  // 非表示列リストの初期化
+  if (!Array.isArray(d.hiddenColumns)) d.hiddenColumns = [];
   return d;
+}
+
+function loadData() {
+  let d = null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) d = JSON.parse(raw);
+  } catch (e) { console.error(e); }
+  return migrate(d || freshData());
 }
 
 // タイトル以降の列の並び順（キー配列）を整える。
 // 固定列キー（platform等）と任意列キー（"x:名前"）と "updatedAt" を含む。
 function defaultOrderKeys() {
-  const fixed = FIXED_COLUMNS.filter(c => c.key !== "title" && c.key !== "updatedAt").map(c => c.key);
-  const custom = data.customColumns.map(c => "x:" + c.name);
-  return [...fixed, ...custom, "updatedAt"];
+  const valid = new Set([
+    ...FIXED_COLUMNS.filter(c => c.key !== "title" && c.key !== "updatedAt").map(c => c.key),
+    ...data.customColumns.map(c => "x:" + c.name),
+  ]);
+  // DEFAULT_ORDER の順を優先し、未掲載の項目は後ろへ。updatedAt は常に末尾。
+  const ordered = DEFAULT_ORDER.filter(k => valid.has(k));
+  const rest = [...valid].filter(k => !ordered.includes(k));
+  return [...ordered, ...rest, "updatedAt"];
 }
 function normalizeOrder() {
   const valid = new Set(defaultOrderKeys());
@@ -414,6 +462,14 @@ function allColumns() {
     }
   }
   return cols;
+}
+
+// 一覧（テーブル）に表示する列。非表示に設定された列を除く（タイトルは常に表示）。
+function visibleColumns() {
+  return allColumns().filter(c => c.key === "title" || !isHidden(c.key));
+}
+function isHidden(key) {
+  return data.hiddenColumns.includes(key);
 }
 
 function getValue(game, col) {
@@ -461,7 +517,7 @@ function getRows(cols) {
 }
 
 function render() {
-  const cols = allColumns();
+  const cols = visibleColumns();
   const rows = getRows(cols);
   const tableEl = document.getElementById("table");
   renderTable(cols, rows);
@@ -726,7 +782,18 @@ function renderColsList() {
     const type = isCustom ? (cc.type || "text") : fc.type;
 
     const row = document.createElement("div");
-    row.className = "col-row";
+    row.className = "col-row" + (isHidden(key) ? " hidden" : "");
+
+    const vis = document.createElement("input");
+    vis.type = "checkbox";
+    vis.checked = !isHidden(key);
+    vis.title = "一覧に表示する";
+    vis.onchange = () => {
+      if (vis.checked) data.hiddenColumns = data.hiddenColumns.filter(k => k !== key);
+      else if (!data.hiddenColumns.includes(key)) data.hiddenColumns.push(key);
+      save(); renderColsList(); render();
+    };
+
     const span = document.createElement("span");
     span.className = "name";
     span.textContent = label;
@@ -744,7 +811,7 @@ function renderColsList() {
     down.disabled = i === data.order.length - 1;
     down.onclick = () => { [data.order[i+1], data.order[i]] = [data.order[i], data.order[i+1]]; save(); renderColsList(); render(); };
 
-    row.append(span, tag, up, down);
+    row.append(vis, span, tag, up, down);
     if (isCustom) {
       const ren = document.createElement("button");
       ren.className = "btn-ghost"; ren.textContent = "名前変更";
@@ -891,15 +958,8 @@ function importData(file) {
       const obj = JSON.parse(reader.result);
       if (!Array.isArray(obj.games)) throw new Error("形式が不正です");
       if (!confirm(`現在のデータを置き換えて読み込みますか？（${obj.games.length} 本）\n念のため事前のエクスポートを推奨します。`)) return;
-      data = obj;
       // 旧形式の取り込みにも対応（loadData と同じ正規化）
-      data.customColumns = (data.customColumns || []).map(c =>
-        typeof c === "string" ? { name: c, type: "text" } : c);
-      data.options = data.options || {};
-      for (const [key, def] of Object.entries(OPTION_FIELDS)) {
-        if (!Array.isArray(data.options[key])) data.options[key] = def.defaults.map(v => ({ v, show: true }));
-      }
-      data.v = 2;
+      data = migrate(obj);
       normalizeOrder();
       save(); render();
       showToast("インポートしました");
