@@ -286,7 +286,8 @@ const STATUS_COLORS = {
 };
 
 // プルダウン選択肢の初期値（表示有無・並び順・追加は「選択肢の設定」で変更可能）
-const DEFAULT_PLATFORMS = ["FC","SFC","GB","GBA","64","GC","WS","PS","PS2","DS","PSP","PS3","Wii","3DS","WiiU","PS4","PSvita","Switch","PS5","Switch2","PC"];
+// 日本国内の発売年月日順（PC は最後）
+const DEFAULT_PLATFORMS = ["FC","MD","GB","SFC","SS","PS","N64","DC","WS","PS2","GBA","GC","Xbox","DS","PSP","Xbox 360","PS3","Wii","3DS","PSvita","WiiU","PS4","Xbox One","Switch","Xbox Series X/S","PS5","Switch2","PC"];
 // ゲームジャンル
 const DEFAULT_GENRES = ["アクション","アドベンチャー","RPG","MMO","シミュレーション","ストラテジー","ハクスラ","サバイバル","ローグライク","ローグライト","ホラー","FPS","TPS","サンドボックス"];
 
@@ -294,6 +295,16 @@ const DEFAULT_GENRES = ["アクション","アドベンチャー","RPG","MMO","�
 const OPTION_FIELDS = {
   platform: { label: "プラットフォーム", defaults: DEFAULT_PLATFORMS },
   genre:    { label: "ジャンル",         defaults: DEFAULT_GENRES },
+};
+
+// 「選択肢の設定」画面でのみ使う表示名（保存値・他画面の表示は短縮名のまま）
+const OPT_DISPLAY_LABELS = {
+  platform: {
+    "MD": "MD(メガドライブ)",
+    "SS": "SS(セガサターン)",
+    "DC": "DC(ドリームキャスト)",
+    "WS": "WS(ワンダースワン)",
+  },
 };
 
 // 表示する選択肢（並び順どおり）を取得
@@ -340,6 +351,19 @@ function loadData() {
     if (!Array.isArray(d.options[key])) {
       d.options[key] = def.defaults.map(v => ({ v, show: true }));
     }
+  }
+  // v3：プラットフォーム選択肢を新しい初期値（日本の発売年順＋機種追加）に更新。
+  // 表示ON/OFF とユーザー独自追加の選択肢は保持する。
+  if (!d.v || d.v < 3) {
+    const existing = Array.isArray(d.options.platform) ? d.options.platform : [];
+    const showOf = new Map(existing.map(o => [o.v === "64" ? "N64" : o.v, o.show !== false]));
+    const merged = DEFAULT_PLATFORMS.map(v => ({ v, show: showOf.has(v) ? showOf.get(v) : true }));
+    for (const o of existing) {
+      const v = o.v === "64" ? "N64" : o.v;
+      if (!DEFAULT_PLATFORMS.includes(v)) merged.push({ v, show: o.show !== false });
+    }
+    d.options.platform = merged;
+    d.v = 3;
   }
   return d;
 }
@@ -805,7 +829,7 @@ function renderOptsList() {
 
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = opt.v;
+    name.textContent = (OPT_DISPLAY_LABELS[optTarget] && OPT_DISPLAY_LABELS[optTarget][opt.v]) || opt.v;
 
     const up = document.createElement("button");
     up.className = "ord"; up.textContent = "▲"; up.title = "上へ";
