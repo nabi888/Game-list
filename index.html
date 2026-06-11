@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ゲーム進捗管理</title>
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1c1f29;
+    --panel2: #232735;
+    --line: #313646;
+    --text: #e6e8ee;
+    --muted: #9aa1b2;
+    --accent: #5b8cff;
+    --accent-d: #4070e0;
+    --danger: #e0556b;
+    --ok: #3fb27f;
+    --warn: #e0a23f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    flex: 0 0 auto;
+  }
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  h1 {
+    font-size: 16px;
+    margin: 0 12px 0 0;
+    white-space: nowrap;
+  }
+  h1 .count { color: var(--muted); font-size: 12px; font-weight: normal; margin-left: 6px; }
+  input, select, button, textarea {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 10px;
+    outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+  button { cursor: pointer; transition: background .12s, border-color .12s; }
+  button:hover { border-color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn-primary:hover { background: var(--accent-d); }
+  .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-ghost { background: transparent; }
+  .grow { flex: 1 1 220px; min-width: 160px; }
+  .spacer { flex: 1 1 auto; }
+
+  main { flex: 1 1 auto; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  td.wrap { white-space: normal; min-width: 160px; }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel2);
+    z-index: 2;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: .03em;
+  }
+  thead th:hover { color: var(--text); }
+  thead th .arrow { color: var(--accent); margin-left: 4px; }
+  tbody tr:hover { background: var(--panel); }
+  tbody tr { cursor: pointer; }
+  td .pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .title-cell { font-weight: 600; }
+  .muted { color: var(--muted); }
+  .actions-cell { white-space: nowrap; }
+  .actions-cell button { padding: 4px 8px; font-size: 12px; margin-left: 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+  a { color: var(--accent); }
+
+  /* modal */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow: auto;
+    z-index: 50;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 560px;
+    padding: 20px 22px;
+  }
+  .modal h2 { margin: 0 0 16px; font-size: 17px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .field input, .field select, .field textarea { width: 100%; }
+  .field textarea { resize: vertical; min-height: 56px; }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .modal-actions .spacer { flex: 1; }
+
+  .col-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 0; border-bottom: 1px solid var(--line);
+  }
+  .col-row .name { flex: 1; }
+  .col-row.fixed .name { color: var(--muted); }
+  .col-row button { font-size: 12px; padding: 3px 9px; }
+  .col-row .ord { background: transparent; border: 1px solid var(--line); padding: 3px 8px; line-height: 1; }
+  .col-row .ord:disabled { opacity: .3; cursor: default; }
+  .add-col { display: flex; gap: 8px; margin-top: 12px; }
+  .add-col input { flex: 1; }
+
+  .opts-list { max-height: 50vh; overflow: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; }
+  .opt-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  .opt-row:last-child { border-bottom: none; }
+  .opt-row .name { flex: 1; }
+  .opt-row.hidden .name { color: var(--muted); text-decoration: line-through; }
+  .opt-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .opt-row .ord { background: transparent; border: 1px solid var(--line); padding: 2px 8px; line-height: 1; }
+  .opt-row .ord:disabled { opacity: .3; cursor: default; }
+  .opt-row .del { background: transparent; border-color: transparent; color: var(--danger); padding: 2px 8px; }
+  .opt-row .del:hover { border-color: var(--danger); }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--accent);
+    padding: 10px 18px; border-radius: 8px; z-index: 100;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <h1>🎮 ゲーム進捗管理<span class="count" id="count"></span></h1>
+    <input class="grow" id="search" type="search" placeholder="検索（タイトル・シリーズ・ジャンル・メモ…）">
+    <select id="filterStatus" title="ステータスで絞り込み">
+      <option value="">全ステータス</option>
+    </select>
+    <span class="spacer"></span>
+    <button class="btn-primary" id="addBtn">＋ 新規追加</button>
+    <button class="btn-ghost" id="optsBtn">選択肢の設定</button>
+    <button class="btn-ghost" id="colsBtn">列の管理</button>
+    <button class="btn-ghost" id="exportBtn">エクスポート</button>
+    <button class="btn-ghost" id="importBtn">インポート</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+  </div>
+</header>
+
+<main>
+  <table id="table">
+    <thead><tr id="headRow"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none"></div>
+</main>
+
+<!-- 追加・編集モーダル -->
+<div class="overlay" id="editOverlay">
+  <div class="modal">
+    <h2 id="editTitle">ゲームを追加</h2>
+    <div id="editFields"></div>
+    <div class="modal-actions">
+      <button class="btn-danger" id="deleteBtn" style="display:none">削除</button>
+      <span class="spacer"></span>
+      <button class="btn-ghost" id="cancelEdit">キャンセル</button>
+      <button class="btn-primary" id="saveEdit">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 選択肢の設定モーダル -->
+<div class="overlay" id="optsOverlay">
+  <div class="modal">
+    <h2>選択肢の設定</h2>
+    <p class="muted" style="margin-top:0;font-size:12px">プルダウンに表示する選択肢の <b>表示／非表示</b>・<b>並び順</b> を変更したり、<b>自分で追加</b> できます。一覧にない値は入力欄に直接書いてもOKです。</p>
+    <div class="field">
+      <label>編集する項目</label>
+      <select id="optTarget"></select>
+    </div>
+    <div id="optsList" class="opts-list"></div>
+    <div class="add-col">
+      <input id="newOptName" type="text" placeholder="選択肢を追加（例：Xbox、Steam Deck…）">
+      <button class="btn-primary" id="addOptBtn">追加</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="resetOptBtn">選択肢を初期値に戻す</button>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="closeOpts">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- 列管理モーダル -->
+<div class="overlay" id="colsOverlay">
+  <div class="modal">
+    <h2>列（項目）の管理</h2>
+    <p class="muted" style="margin-top:0;font-size:12px">「タイトル」より下の項目は ▲▼ で並び順を変更できます。任意項目は名前変更・削除も可能です。</p>
+    <div id="colsList"></div>
+    <div class="add-col">
+      <input id="newColName" type="text" placeholder="新しい項目名（例：難易度、おすすめ度…）">
+      <select id="newColType" title="入力タイプ">
+        <option value="text">文字</option>
+        <option value="number">数値</option>
+        <option value="date">日付</option>
+      </select>
+      <button class="btn-primary" id="addColBtn">追加</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="closeCols">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const STORAGE_KEY = "game-progress-tracker-v1";
+
+// 標準項目（固定・順番もこの通り）。key はデータ保存用、label は表示名。
+const FIXED_COLUMNS = [
+  { key: "title",        label: "タイトル",            type: "text" },
+  { key: "platform",     label: "プラットフォーム",    type: "datalist" },
+  { key: "purchaseDate", label: "購入日",              type: "date" },
+  { key: "series",       label: "シリーズ",            type: "text" },
+  { key: "genre",        label: "ジャンル",            type: "datalist" },
+  { key: "status",       label: "ステータス",          type: "status" },
+  { key: "nextTodo",     label: "次にやること",        type: "textarea" },
+  { key: "updatedAt",    label: "更新日時",            type: "auto" },
+];
+
+const STATUS_OPTIONS = ["未プレイ", "積みゲー", "プレイ中", "中断", "クリア", "やり込み中", "コンプリート"];
+const STATUS_COLORS = {
+  "未プレイ":     "#3a4055",
+  "積みゲー":     "#6b5a2e",
+  "プレイ中":     "#2f6fb0",
+  "中断":         "#7a4a4a",
+  "クリア":       "#2f7a55",
+  "やり込み中":   "#4a5fa0",
+  "コンプリート": "#6a3f8a",
+};
+
+// プルダウン選択肢の初期値（表示有無・並び順・追加は「選択肢の設定」で変更可能）
+const DEFAULT_PLATFORMS = ["FC","SFC","GB","GBA","64","GC","WS","PS","PS2","DS","PSP","PS3","Wii","3DS","WiiU","PS4","PSvita","Switch","PS5","Switch2","PC"];
+// ゲームジャンル
+const DEFAULT_GENRES = ["アクション","アドベンチャー","RPG","MMO","シミュレーション","ストラテジー","ハクスラ","サバイバル","ローグライク","ローグライト","ホラー","FPS","TPS","サンドボックス"];
+
+// 選択肢リストを編集できる項目の定義（key は FIXED_COLUMNS の key と対応）
+const OPTION_FIELDS = {
+  platform: { label: "プラットフォーム", defaults: DEFAULT_PLATFORMS },
+  genre:    { label: "ジャンル",         defaults: DEFAULT_GENRES },
+};
+
+// 表示する選択肢（並び順どおり）を取得
+function getOptions(field) {
+  return (data.options?.[field] || []).filter(o => o.show !== false).map(o => o.v);
+}
+
+// ---- データ読み込み ----
+function loadData() {
+  let d = null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) d = JSON.parse(raw);
+  } catch (e) { console.error(e); }
+  if (!d) {
+    // 新規：任意追加項目の初期値（name と入力タイプ）
+    d = {
+      v: 2,
+      customColumns: [
+        { name: "ルート",     type: "text" },
+        { name: "主人公",     type: "text" },
+        { name: "プレイ時間", type: "number" },
+        { name: "クリア日",   type: "date" },
+      ],
+      games: [],
+    };
+  }
+  // v2 への移行（旧データ）
+  if (!d.v || d.v < 2) {
+    // 任意項目：文字列 → {name, type} へ変換
+    d.customColumns = (d.customColumns || []).map(c =>
+      typeof c === "string" ? { name: c, type: "text" } : c);
+    const names = new Set(d.customColumns.map(c => c.name));
+    if (!names.has("プレイ時間")) d.customColumns.push({ name: "プレイ時間", type: "number" });
+    if (!names.has("クリア日"))   d.customColumns.push({ name: "クリア日",   type: "date" });
+    // ジャンルの選択肢を新しい初期値に更新
+    d.options = d.options || {};
+    d.options.genre = DEFAULT_GENRES.map(v => ({ v, show: true }));
+    d.v = 2;
+  }
+  // 選択肢リストの初期化
+  if (!d.options) d.options = {};
+  for (const [key, def] of Object.entries(OPTION_FIELDS)) {
+    if (!Array.isArray(d.options[key])) {
+      d.options[key] = def.defaults.map(v => ({ v, show: true }));
+    }
+  }
+  return d;
+}
+
+// タイトル以降の列の並び順（キー配列）を整える。
+// 固定列キー（platform等）と任意列キー（"x:名前"）と "updatedAt" を含む。
+function defaultOrderKeys() {
+  const fixed = FIXED_COLUMNS.filter(c => c.key !== "title" && c.key !== "updatedAt").map(c => c.key);
+  const custom = data.customColumns.map(c => "x:" + c.name);
+  return [...fixed, ...custom, "updatedAt"];
+}
+function normalizeOrder() {
+  const valid = new Set(defaultOrderKeys());
+  if (!Array.isArray(data.order)) data.order = [];
+  data.order = data.order.filter(k => valid.has(k)); // 不要キーを除去
+  for (const k of defaultOrderKeys()) {              // 不足キーを補完
+    if (data.order.includes(k)) continue;
+    const at = data.order.indexOf("updatedAt");
+    if (k !== "updatedAt" && at >= 0) data.order.splice(at, 0, k);
+    else data.order.push(k);
+  }
+}
+
+let data = loadData();
+normalizeOrder();
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// ---- 表示状態 ----
+let sortKey = "updatedAt";
+let sortDir = -1; // -1: 降順, 1: 昇順
+let searchText = "";
+let filterStatus = "";
+
+// 全列の定義を返す。先頭は常に「タイトル」、以降は data.order の並び順。
+function allColumns() {
+  const cols = [FIXED_COLUMNS.find(c => c.key === "title")];
+  for (const key of data.order) {
+    if (key.startsWith("x:")) {
+      const name = key.slice(2);
+      const cc = data.customColumns.find(c => c.name === name);
+      if (cc) cols.push({ key, label: name, type: cc.type || "text", custom: true });
+    } else {
+      const fc = FIXED_COLUMNS.find(c => c.key === key);
+      if (fc) cols.push(fc);
+    }
+  }
+  return cols;
+}
+
+function getValue(game, col) {
+  if (col.custom) return (game.extra && game.extra[col.label]) || "";
+  return game[col.key] || "";
+}
+
+// ---- フォーマット ----
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// ---- 一覧描画 ----
+// 絞り込み・並べ替え済みの行を返す
+function getRows(cols) {
+  let rows = data.games.slice();
+  const q = searchText.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(g => {
+      const hay = [g.title, g.platform, g.series, g.genre, g.status, g.nextTodo,
+        ...Object.values(g.extra || {})].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  if (filterStatus) rows = rows.filter(g => g.status === filterStatus);
+
+  rows.sort((a, b) => {
+    const col = cols.find(c => c.key === sortKey) || cols[0];
+    let va = getValue(a, col), vb = getValue(b, col);
+    if (col.type === "date" || col.type === "number" || col.key === "updatedAt") {
+      if (col.type === "number") { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      else { va = va ? new Date(va).getTime() : 0; vb = vb ? new Date(vb).getTime() : 0; }
+    } else {
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+    }
+    if (va < vb) return -1 * sortDir;
+    if (va > vb) return 1 * sortDir;
+    return 0;
+  });
+  return rows;
+}
+
+function render() {
+  const cols = allColumns();
+  const rows = getRows(cols);
+  const tableEl = document.getElementById("table");
+  renderTable(cols, rows);
+
+  document.getElementById("count").textContent = `（${rows.length} / ${data.games.length} 本）`;
+  const empty = document.getElementById("empty");
+  if (data.games.length === 0) {
+    empty.style.display = "block";
+    empty.textContent = "まだ登録がありません。「＋ 新規追加」から始めましょう。";
+    tableEl.style.display = "none";
+  } else if (rows.length === 0) {
+    empty.style.display = "block";
+    empty.textContent = "条件に一致するゲームがありません。";
+    tableEl.style.display = "";
+  } else {
+    empty.style.display = "none";
+    tableEl.style.display = "";
+  }
+  refreshStatusFilter();
+}
+
+function renderTable(cols, rows) {
+  // ヘッダー
+  const head = document.getElementById("headRow");
+  head.innerHTML = "";
+  for (const col of cols) {
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    if (sortKey === col.key) {
+      const a = document.createElement("span");
+      a.className = "arrow";
+      a.textContent = sortDir === 1 ? "▲" : "▼";
+      th.appendChild(a);
+    }
+    th.onclick = () => {
+      if (sortKey === col.key) sortDir *= -1;
+      else { sortKey = col.key; sortDir = 1; }
+      render();
+    };
+    head.appendChild(th);
+  }
+  const thAct = document.createElement("th");
+  thAct.textContent = "操作";
+  head.appendChild(thAct);
+
+  const body = document.getElementById("body");
+  body.innerHTML = "";
+  for (const g of rows) {
+    const tr = document.createElement("tr");
+    tr.onclick = () => openEdit(g.id);
+    for (const col of cols) {
+      const td = document.createElement("td");
+      if (col.key === "status") {
+        if (g.status) td.appendChild(statusPill(g.status));
+      } else if (col.key === "updatedAt") {
+        td.textContent = fmtDateTime(g.updatedAt);
+        td.className = "muted";
+      } else if (col.key === "title") {
+        td.textContent = getValue(g, col);
+        td.className = "title-cell";
+      } else if (col.key === "nextTodo") {
+        td.textContent = getValue(g, col);
+        td.className = "wrap muted";
+      } else {
+        td.textContent = getValue(g, col);
+      }
+      tr.appendChild(td);
+    }
+    const tdAct = document.createElement("td");
+    tdAct.className = "actions-cell";
+    const del = document.createElement("button");
+    del.className = "btn-danger";
+    del.textContent = "削除";
+    del.onclick = (e) => { e.stopPropagation(); removeGame(g.id); };
+    tdAct.appendChild(del);
+    tr.appendChild(tdAct);
+    body.appendChild(tr);
+  }
+}
+
+function statusPill(status) {
+  const pill = document.createElement("span");
+  pill.className = "pill";
+  pill.textContent = status;
+  pill.style.background = STATUS_COLORS[status] || "#3a4055";
+  pill.style.color = "#fff";
+  return pill;
+}
+
+function refreshStatusFilter() {
+  const sel = document.getElementById("filterStatus");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全ステータス</option>';
+  for (const s of STATUS_OPTIONS) {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+
+// 入力候補（既存値から収集）
+function suggestionsFor(key) {
+  const set = new Set();
+  for (const g of data.games) { if (g[key]) set.add(g[key]); }
+  return [...set].sort();
+}
+
+// ---- 追加・編集モーダル ----
+let editingId = null;
+
+function openEdit(id) {
+  editingId = id;
+  const game = id ? data.games.find(g => g.id === id) : null;
+  document.getElementById("editTitle").textContent = game ? "ゲームを編集" : "ゲームを追加";
+  document.getElementById("deleteBtn").style.display = game ? "" : "none";
+
+  const wrap = document.getElementById("editFields");
+  wrap.innerHTML = "";
+
+  // 編集フォームは「タイトル + 表示順どおりの列」で構成（更新日時は自動なので除外）
+  const fields = allColumns().filter(c => c.type !== "auto");
+
+  for (const f of fields) {
+    const div = document.createElement("div");
+    div.className = "field";
+    const lab = document.createElement("label");
+    lab.textContent = f.label + (f.key === "title" ? " *" : "");
+    div.appendChild(lab);
+
+    const val = game ? (f.custom ? (game.extra?.[f.label] || "") : (game[f.key] || "")) : "";
+    let input;
+    if (f.type === "status") {
+      input = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = ""; blank.textContent = "（未設定）";
+      input.appendChild(blank);
+      for (const s of STATUS_OPTIONS) {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = s;
+        input.appendChild(o);
+      }
+      input.value = val;
+    } else if (f.type === "textarea") {
+      input = document.createElement("textarea");
+      input.value = val;
+    } else if (f.type === "date") {
+      input = document.createElement("input");
+      input.type = "date";
+      input.value = val;
+    } else if (f.type === "datalist") {
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = val;
+      const listId = "dl_" + f.key;
+      const dl = document.createElement("datalist");
+      dl.id = listId;
+      // 設定された選択肢を優先表示し、過去に入力した値も候補に加える
+      const opts = OPTION_FIELDS[f.key] ? getOptions(f.key) : suggestionsFor(f.key);
+      const seen = new Set(opts);
+      for (const s of suggestionsFor(f.key)) { if (!seen.has(s)) { opts.push(s); seen.add(s); } }
+      for (const s of opts) {
+        const o = document.createElement("option"); o.value = s; dl.appendChild(o);
+      }
+      input.setAttribute("list", listId);
+      input.placeholder = "選択または入力";
+      div.appendChild(dl);
+    } else if (f.type === "number") {
+      input = document.createElement("input");
+      input.type = "number";
+      input.step = "any"; input.min = "0";
+      input.value = val;
+      input.placeholder = f.label === "プレイ時間" ? "時間（例：35）" : "";
+    } else {
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = val;
+    }
+    input.dataset.fkey = f.key;
+    input.dataset.custom = f.custom ? "1" : "";
+    input.dataset.label = f.label;
+    div.appendChild(input);
+    wrap.appendChild(div);
+  }
+
+  document.getElementById("editOverlay").classList.add("open");
+  const first = wrap.querySelector("input,select,textarea");
+  if (first) first.focus();
+}
+
+function closeEdit() {
+  document.getElementById("editOverlay").classList.remove("open");
+  editingId = null;
+}
+
+function saveEdit() {
+  const inputs = document.querySelectorAll("#editFields [data-fkey]");
+  const obj = { extra: {} };
+  let title = "";
+  for (const inp of inputs) {
+    const v = inp.value.trim();
+    if (inp.dataset.custom === "1") {
+      obj.extra[inp.dataset.label] = v;
+    } else {
+      obj[inp.dataset.fkey] = v;
+      if (inp.dataset.fkey === "title") title = v;
+    }
+  }
+  if (!title) { showToast("タイトルを入力してください"); return; }
+
+  const now = new Date().toISOString();
+  if (editingId) {
+    const g = data.games.find(g => g.id === editingId);
+    Object.assign(g, obj);
+    g.extra = obj.extra;
+    g.updatedAt = now;
+  } else {
+    obj.id = "g" + now + Math.floor(Math.random() * 1e6);
+    obj.updatedAt = now;
+    data.games.push(obj);
+  }
+  save();
+  closeEdit();
+  render();
+  showToast("保存しました");
+}
+
+function removeGame(id) {
+  const g = data.games.find(g => g.id === id);
+  if (!g) return;
+  if (!confirm(`「${g.title}」を削除しますか？`)) return;
+  data.games = data.games.filter(x => x.id !== id);
+  save();
+  if (editingId === id) closeEdit();
+  render();
+  showToast("削除しました");
+}
+
+// ---- 列管理 ----
+function openCols() {
+  renderColsList();
+  document.getElementById("colsOverlay").classList.add("open");
+}
+const TYPE_LABEL = { text: "文字", number: "数値", date: "日付", datalist: "選択", status: "選択", auto: "自動" };
+
+function renderColsList() {
+  const list = document.getElementById("colsList");
+  list.innerHTML = "";
+
+  // タイトル（常に先頭・固定）
+  const titleRow = document.createElement("div");
+  titleRow.className = "col-row fixed";
+  titleRow.innerHTML = `<span class="name">タイトル</span><span class="muted">先頭固定</span>`;
+  list.appendChild(titleRow);
+
+  // タイトル以降（並び替え可能）
+  data.order.forEach((key, i) => {
+    const isCustom = key.startsWith("x:");
+    const cc = isCustom ? data.customColumns.find(c => c.name === key.slice(2)) : null;
+    const fc = !isCustom ? FIXED_COLUMNS.find(c => c.key === key) : null;
+    const label = isCustom ? cc.name : fc.label;
+    const type = isCustom ? (cc.type || "text") : fc.type;
+
+    const row = document.createElement("div");
+    row.className = "col-row";
+    const span = document.createElement("span");
+    span.className = "name";
+    span.textContent = label;
+    const tag = document.createElement("span");
+    tag.className = "muted"; tag.style.fontSize = "12px";
+    tag.textContent = (isCustom ? "任意・" : "標準・") + (TYPE_LABEL[type] || "文字");
+
+    const up = document.createElement("button");
+    up.className = "ord"; up.textContent = "▲"; up.title = "上へ";
+    up.disabled = i === 0;
+    up.onclick = () => { [data.order[i-1], data.order[i]] = [data.order[i], data.order[i-1]]; save(); renderColsList(); render(); };
+
+    const down = document.createElement("button");
+    down.className = "ord"; down.textContent = "▼"; down.title = "下へ";
+    down.disabled = i === data.order.length - 1;
+    down.onclick = () => { [data.order[i+1], data.order[i]] = [data.order[i], data.order[i+1]]; save(); renderColsList(); render(); };
+
+    row.append(span, tag, up, down);
+    if (isCustom) {
+      const ren = document.createElement("button");
+      ren.className = "btn-ghost"; ren.textContent = "名前変更";
+      ren.onclick = () => renameCol(key.slice(2));
+      const del = document.createElement("button");
+      del.className = "btn-danger"; del.textContent = "削除";
+      del.onclick = () => deleteCol(key.slice(2));
+      row.append(ren, del);
+    }
+    list.appendChild(row);
+  });
+}
+function addCol() {
+  const inp = document.getElementById("newColName");
+  const typeSel = document.getElementById("newColType");
+  const name = inp.value.trim();
+  if (!name) return;
+  if (FIXED_COLUMNS.some(c => c.label === name) || data.customColumns.some(c => c.name === name)) {
+    showToast("同じ名前の項目があります"); return;
+  }
+  data.customColumns.push({ name, type: typeSel.value || "text" });
+  normalizeOrder();
+  inp.value = "";
+  save(); renderColsList(); render();
+}
+function renameCol(old) {
+  const cc = data.customColumns.find(c => c.name === old);
+  if (!cc) return;
+  const name = prompt("新しい項目名", old);
+  if (!name) return;
+  const t = name.trim();
+  if (!t || t === old) return;
+  if (FIXED_COLUMNS.some(c => c.label === t) || data.customColumns.some(c => c.name === t)) {
+    showToast("同じ名前の項目があります"); return;
+  }
+  cc.name = t;
+  // 並び順キーも置き換えて位置を維持
+  const oi = data.order.indexOf("x:" + old);
+  if (oi >= 0) data.order[oi] = "x:" + t;
+  for (const g of data.games) {
+    if (g.extra && old in g.extra) { g.extra[t] = g.extra[old]; delete g.extra[old]; }
+  }
+  save(); renderColsList(); render();
+}
+function deleteCol(name) {
+  if (!confirm(`項目「${name}」を削除しますか？\n各ゲームのこの項目の内容も消えます。`)) return;
+  data.customColumns = data.customColumns.filter(c => c.name !== name);
+  normalizeOrder();
+  for (const g of data.games) { if (g.extra) delete g.extra[name]; }
+  save(); renderColsList(); render();
+}
+
+// ---- 選択肢の設定（プラットフォーム / ジャンル）----
+let optTarget = "platform";
+
+function openOpts() {
+  const sel = document.getElementById("optTarget");
+  sel.innerHTML = "";
+  for (const [key, def] of Object.entries(OPTION_FIELDS)) {
+    const o = document.createElement("option");
+    o.value = key; o.textContent = def.label;
+    sel.appendChild(o);
+  }
+  sel.value = optTarget;
+  renderOptsList();
+  document.getElementById("optsOverlay").classList.add("open");
+}
+
+function renderOptsList() {
+  const list = document.getElementById("optsList");
+  list.innerHTML = "";
+  const arr = data.options[optTarget];
+  arr.forEach((opt, i) => {
+    const row = document.createElement("div");
+    row.className = "opt-row" + (opt.show === false ? " hidden" : "");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = opt.show !== false;
+    cb.title = "表示する";
+    cb.onchange = () => { opt.show = cb.checked; save(); renderOptsList(); render(); };
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = opt.v;
+
+    const up = document.createElement("button");
+    up.className = "ord"; up.textContent = "▲"; up.title = "上へ";
+    up.disabled = i === 0;
+    up.onclick = () => { [arr[i-1], arr[i]] = [arr[i], arr[i-1]]; save(); renderOptsList(); render(); };
+
+    const down = document.createElement("button");
+    down.className = "ord"; down.textContent = "▼"; down.title = "下へ";
+    down.disabled = i === arr.length - 1;
+    down.onclick = () => { [arr[i+1], arr[i]] = [arr[i], arr[i+1]]; save(); renderOptsList(); render(); };
+
+    const del = document.createElement("button");
+    del.className = "del"; del.textContent = "削除";
+    del.onclick = () => {
+      if (!confirm(`選択肢「${opt.v}」を削除しますか？\n（登録済みゲームの入力内容は変わりません）`)) return;
+      arr.splice(i, 1); save(); renderOptsList(); render();
+    };
+
+    row.append(cb, name, up, down, del);
+    list.appendChild(row);
+  });
+}
+
+function addOpt() {
+  const inp = document.getElementById("newOptName");
+  const v = inp.value.trim();
+  if (!v) return;
+  const arr = data.options[optTarget];
+  if (arr.some(o => o.v === v)) { showToast("同じ選択肢があります"); return; }
+  arr.push({ v, show: true });
+  inp.value = "";
+  save(); renderOptsList(); render();
+}
+
+function resetOpts() {
+  const def = OPTION_FIELDS[optTarget];
+  if (!confirm(`「${def.label}」の選択肢を初期値に戻しますか？\n追加・並び替え・表示設定はすべてリセットされます。`)) return;
+  data.options[optTarget] = def.defaults.map(v => ({ v, show: true }));
+  save(); renderOptsList(); render();
+}
+
+// ---- エクスポート / インポート ----
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  a.href = url;
+  a.download = `game-progress_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("エクスポートしました");
+}
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!Array.isArray(obj.games)) throw new Error("形式が不正です");
+      if (!confirm(`現在のデータを置き換えて読み込みますか？（${obj.games.length} 本）\n念のため事前のエクスポートを推奨します。`)) return;
+      data = obj;
+      // 旧形式の取り込みにも対応（loadData と同じ正規化）
+      data.customColumns = (data.customColumns || []).map(c =>
+        typeof c === "string" ? { name: c, type: "text" } : c);
+      data.options = data.options || {};
+      for (const [key, def] of Object.entries(OPTION_FIELDS)) {
+        if (!Array.isArray(data.options[key])) data.options[key] = def.defaults.map(v => ({ v, show: true }));
+      }
+      data.v = 2;
+      normalizeOrder();
+      save(); render();
+      showToast("インポートしました");
+    } catch (e) {
+      alert("読み込みに失敗しました: " + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ---- トースト ----
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+// ---- イベント ----
+document.getElementById("addBtn").onclick = () => openEdit(null);
+document.getElementById("saveEdit").onclick = saveEdit;
+document.getElementById("cancelEdit").onclick = closeEdit;
+document.getElementById("deleteBtn").onclick = () => removeGame(editingId);
+document.getElementById("optsBtn").onclick = openOpts;
+document.getElementById("optTarget").onchange = e => { optTarget = e.target.value; renderOptsList(); };
+document.getElementById("addOptBtn").onclick = addOpt;
+document.getElementById("newOptName").onkeydown = e => { if (e.key === "Enter") addOpt(); };
+document.getElementById("resetOptBtn").onclick = resetOpts;
+document.getElementById("closeOpts").onclick = () => document.getElementById("optsOverlay").classList.remove("open");
+document.getElementById("colsBtn").onclick = openCols;
+document.getElementById("closeCols").onclick = () => document.getElementById("colsOverlay").classList.remove("open");
+document.getElementById("addColBtn").onclick = addCol;
+document.getElementById("newColName").onkeydown = e => { if (e.key === "Enter") addCol(); };
+document.getElementById("exportBtn").onclick = exportData;
+document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; };
+document.getElementById("search").oninput = e => { searchText = e.target.value; render(); };
+document.getElementById("filterStatus").onchange = e => { filterStatus = e.target.value; render(); };
+
+// オーバーレイ外クリックで閉じる
+for (const ov of document.querySelectorAll(".overlay")) {
+  ov.addEventListener("click", e => { if (e.target === ov) ov.classList.remove("open"); });
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach(o => o.classList.remove("open"));
+});
+
+render();
+</script>
+</body>
+</html>
