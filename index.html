@@ -208,7 +208,7 @@
 
   .mm-canvas {
     position: relative; flex: 1 1 auto; overflow: hidden;
-    cursor: default;
+    cursor: grab;
     background: radial-gradient(circle, #2a2f3d 1px, transparent 1px);
     background-size: 26px 26px;
   }
@@ -1428,7 +1428,7 @@ function renderMindmap() {
   document.getElementById("mmUndo").disabled = mmUndoStack.length === 0;
   document.getElementById("mmHint").textContent = mmConnectMode
     ? "接続モード：つなぐ2つの四角を順にクリック（同じ組を再クリックで接続解除／「接続」でモード終了）"
-    : "ドラッグ＝範囲選択（複数まとめて移動）／Ctrl+ドラッグ＝画面移動／何もない所をダブルクリックで四角を追加／四角の右下でサイズ変更／画像は Ctrl+V／Ctrl+Z で元に戻す";
+    : "ドラッグ＝画面移動／Ctrl+ドラッグ＝範囲選択（複数まとめて移動）／何もない所をダブルクリックで四角を追加／四角の右下でサイズ変更／画像は Ctrl+V／Ctrl+Z で元に戻す";
   renderNodes();
   renderEdges();
   renderHeadings();
@@ -1679,24 +1679,25 @@ function onMmMouseUp() {
   }
 }
 
-// 背景での mousedown：Ctrl+ドラッグで画面移動、素のドラッグで範囲選択。
+// 背景での mousedown：Ctrl+ドラッグで範囲選択、素のドラッグで画面移動。
 function onCanvasMouseDown(e) {
   if (!mmGame) return;
   if (e.target.closest(".mm-node") || e.target.closest(".mm-headings")) return;
   const m = mmGame.mindmap;
   if (e.ctrlKey || e.metaKey) {
-    mmPan = { startX: e.clientX, startY: e.clientY, opx: m.panX, opy: m.panY };
-    document.getElementById("mmCanvas").classList.add("panning");
+    // 範囲選択の開始
+    mmSelectClear();
+    const rect = document.getElementById("mmCanvas").getBoundingClientRect();
+    mmSelecting = { rect, x0: e.clientX - rect.left, y0: e.clientY - rect.top, curr: null };
+    const box = document.getElementById("mmSelectBox");
+    box.style.display = "block";
+    box.style.left = mmSelecting.x0 + "px"; box.style.top = mmSelecting.y0 + "px";
+    box.style.width = "0"; box.style.height = "0";
     return;
   }
-  // 範囲選択の開始
-  mmSelectClear();
-  const rect = document.getElementById("mmCanvas").getBoundingClientRect();
-  mmSelecting = { rect, x0: e.clientX - rect.left, y0: e.clientY - rect.top, curr: null };
-  const box = document.getElementById("mmSelectBox");
-  box.style.display = "block";
-  box.style.left = mmSelecting.x0 + "px"; box.style.top = mmSelecting.y0 + "px";
-  box.style.width = "0"; box.style.height = "0";
+  // 画面移動（パン）
+  mmPan = { startX: e.clientX, startY: e.clientY, opx: m.panX, opy: m.panY };
+  document.getElementById("mmCanvas").classList.add("panning");
 }
 
 // 何もない所をダブルクリック → その位置に四角を追加
