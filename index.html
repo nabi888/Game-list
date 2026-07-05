@@ -208,11 +208,18 @@
 
   .mm-canvas {
     position: relative; flex: 1 1 auto; overflow: hidden;
-    cursor: grab;
+    cursor: default;
     background: radial-gradient(circle, #2a2f3d 1px, transparent 1px);
     background-size: 26px 26px;
   }
   .mm-canvas.panning { cursor: grabbing; }
+  /* 範囲選択の矩形 */
+  .mm-selectbox {
+    position: absolute; z-index: 6; display: none;
+    border: 1px dashed var(--accent);
+    background: rgba(91,140,255,.12);
+    pointer-events: none;
+  }
   .mm-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #mmEdges {
     position: absolute; top: 0; left: 0; width: 1px; height: 1px;
@@ -231,22 +238,66 @@
   }
   .mm-node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,140,255,.4); }
   .mm-node.connect-src { border-color: var(--ok); box-shadow: 0 0 0 2px rgba(63,178,127,.4); }
-  .mm-node-content { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .mm-node.heading { border-left: 4px solid var(--warn); }
+  .mm-node-content { white-space: pre-wrap; word-break: break-word; line-height: 1.5; height: 100%; overflow: auto; }
   .mm-node-content a { color: var(--accent); }
-  .mm-node-content img { max-width: 100%; border-radius: 4px; display: block; margin: 2px 0; }
+  .mm-node-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 2px 0; }
   .mm-node-content .placeholder { color: var(--muted); }
+  .mm-node-badge {
+    position: absolute; top: -9px; left: -6px;
+    font-size: 11px; line-height: 1;
+    background: var(--warn); color: #1b1300;
+    padding: 2px 6px; border-radius: 999px; font-weight: 600;
+  }
   .mm-node-edit {
-    width: 100%; min-height: 3em; resize: none;
-    font-size: inherit; line-height: 1.5; padding: 2px 4px;
+    width: 100%; height: 100%; min-height: 3em; resize: none;
+    font-size: inherit; line-height: 1.5; padding: 2px 4px; overflow: auto;
   }
   .mm-node-del {
     position: absolute; top: -10px; right: -10px;
     width: 20px; height: 20px; line-height: 1; padding: 0;
     border-radius: 50%; font-size: 12px;
     background: var(--danger); border-color: var(--danger); color: #fff;
-    display: none; cursor: pointer;
+    display: none; cursor: pointer; z-index: 2;
   }
   .mm-node:hover .mm-node-del, .mm-node.selected .mm-node-del { display: block; }
+  /* サイズ変更ハンドル（右下） */
+  .mm-node-resize {
+    position: absolute; right: 1px; bottom: 1px;
+    width: 14px; height: 14px; cursor: nwse-resize; display: none; z-index: 2;
+  }
+  .mm-node-resize::after {
+    content: ""; position: absolute; right: 1px; bottom: 1px;
+    width: 0; height: 0;
+    border-left: 9px solid transparent; border-bottom: 9px solid var(--muted);
+  }
+  .mm-node:hover .mm-node-resize, .mm-node.selected .mm-node-resize { display: block; }
+
+  /* 見出し一覧パネル（右側） */
+  .mm-headings {
+    position: absolute; top: 10px; right: 10px; z-index: 7;
+    width: 210px; max-height: calc(100% - 20px);
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .mm-headings.collapsed { width: auto; }
+  .mm-headings.collapsed .mm-headings-list,
+  .mm-headings.collapsed .mm-head-title { display: none; }
+  .mm-headings-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-bottom: 1px solid var(--line);
+  }
+  .mm-headings.collapsed .mm-headings-bar { border-bottom: none; }
+  .mm-head-title { font-size: 12px; color: var(--muted); }
+  .mm-head-toggle { padding: 2px 8px; font-size: 12px; }
+  .mm-headings-list { overflow: auto; padding: 4px; }
+  .mm-heading-item {
+    padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mm-heading-item:hover { background: var(--panel2); }
+  .mm-headings-empty { padding: 8px; color: var(--muted); font-size: 12px; }
 
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -363,6 +414,8 @@
     <span class="spacer"></span>
     <button class="btn-primary" id="mmAddNode">＋ 四角を追加</button>
     <button class="btn-ghost" id="mmConnect">接続</button>
+    <button class="btn-ghost" id="mmHeading">見出し</button>
+    <button class="btn-ghost" id="mmUndo" title="元に戻す（Ctrl+Z）">↩ 戻す</button>
     <div class="grp">
       <span class="lbl">文字</span>
       <button class="btn-ghost" id="mmFontDown" title="文字を小さく">－</button>
@@ -382,6 +435,14 @@
     <div class="mm-world" id="mmWorld">
       <svg id="mmEdges"></svg>
       <div id="mmNodes"></div>
+    </div>
+    <div class="mm-selectbox" id="mmSelectBox"></div>
+    <div class="mm-headings" id="mmHeadings">
+      <div class="mm-headings-bar">
+        <button class="mm-head-toggle" id="mmHeadToggle" title="見出し一覧の表示切替">◀</button>
+        <span class="mm-head-title">見出し一覧</span>
+      </div>
+      <div class="mm-headings-list" id="mmHeadingsList"></div>
     </div>
   </div>
 </div>
@@ -1259,17 +1320,22 @@ function importData(file) {
 
 // ==== マインドマップ ====
 // データは各ゲームの g.mindmap に保存（nodes / edges / fontSize / scale / panX / panY）。
-// 図形は四角のみ。四角には単語・URL（自動リンク化）・貼り付け画像を入れられる。
+// 図形は四角のみ。四角には単語・URL（自動リンク化）・貼り付け画像を入れられ、
+// 個別にサイズ変更・見出し指定ができる。ノード: { id, x, y, w?, h?, text, img, heading? }
 const MM_NS = "http://www.w3.org/2000/svg";
 const MM_URL_RE = /(https?:\/\/[^\s]+)/g;
+const MM_UNDO_MAX = 3; // 元に戻せる手数
 
 let mmGame = null;          // 表示中のゲーム
-let mmSel = null;           // 選択中ノードID
+let mmSel = new Set();      // 選択中ノードIDの集合
 let mmEditing = null;       // 編集中ノード（オブジェクト）
 let mmConnectMode = false;  // 接続モード中か
 let mmConnectFrom = null;   // 接続の始点ノードID
-let mmDrag = null;          // ノードドラッグ状態
-let mmPan = null;           // キャンバスパン状態
+let mmDrag = null;          // ノードドラッグ状態（複数移動対応）
+let mmResize = null;        // サイズ変更状態
+let mmPan = null;           // キャンバスパン状態（Ctrl+ドラッグ）
+let mmSelecting = null;     // 範囲選択状態
+let mmUndoStack = [];       // 元に戻す用スナップショット（最大 MM_UNDO_MAX 件）
 const mmNodeEls = new Map();// nodeId -> DOM要素
 
 function mmNewId() {
@@ -1288,13 +1354,39 @@ function ensureMindmap(g) {
   return m;
 }
 
+// ---- 元に戻す（Undo）----
+// nodes / edges のスナップショット（変更前の状態）を積む。表示状態（拡大・位置）は対象外。
+function mmSnapshot() {
+  return JSON.stringify({ nodes: mmGame.mindmap.nodes, edges: mmGame.mindmap.edges });
+}
+function mmPushUndo(snap) {
+  mmUndoStack.push(snap != null ? snap : mmSnapshot());
+  while (mmUndoStack.length > MM_UNDO_MAX) mmUndoStack.shift();
+}
+function mmUndo() {
+  if (!mmUndoStack.length) { showToast("これ以上戻せません"); return; }
+  const st = JSON.parse(mmUndoStack.pop());
+  mmGame.mindmap.nodes = st.nodes;
+  mmGame.mindmap.edges = st.edges;
+  mmSel = new Set();
+  mmConnectFrom = null;
+  mmEditing = null;
+  save();
+  renderMindmap();
+}
+
 function openMindmap(id) {
   const g = data.games.find(x => x.id === id);
   if (!g) return;
   mmGame = g;
   ensureMindmap(g);
-  mmSel = null; mmEditing = null; mmConnectMode = false; mmConnectFrom = null;
+  mmSel = new Set(); mmEditing = null; mmConnectMode = false; mmConnectFrom = null;
+  mmDrag = null; mmResize = null; mmPan = null; mmSelecting = null; mmUndoStack = [];
   document.getElementById("mmTitle").textContent = "🧠 " + (g.title || "（無題）");
+  // 見出しパネルは開くたびに展開状態から
+  const hp = document.getElementById("mmHeadings");
+  hp.classList.remove("collapsed");
+  document.getElementById("mmHeadToggle").textContent = "◀";
   document.getElementById("mindmapScreen").classList.add("open");
   // 画面表示後にキャンバスサイズが確定するので描画・初期配置を次フレームで行う
   requestAnimationFrame(() => {
@@ -1313,9 +1405,9 @@ function openMindmap(id) {
 
 function closeMindmap() {
   document.getElementById("mindmapScreen").classList.remove("open");
-  mmGame = null; mmSel = null; mmEditing = null;
+  mmGame = null; mmSel = new Set(); mmEditing = null;
   mmConnectMode = false; mmConnectFrom = null;
-  mmDrag = null; mmPan = null;
+  mmDrag = null; mmResize = null; mmPan = null; mmSelecting = null; mmUndoStack = [];
   render(); // 一覧の「🧠」表示を更新
 }
 
@@ -1333,11 +1425,13 @@ function renderMindmap() {
   document.getElementById("mmFontVal").textContent = m.fontSize + "px";
   document.getElementById("mmZoomVal").textContent = Math.round(m.scale * 100) + "%";
   document.getElementById("mmConnect").classList.toggle("btn-primary", mmConnectMode);
+  document.getElementById("mmUndo").disabled = mmUndoStack.length === 0;
   document.getElementById("mmHint").textContent = mmConnectMode
     ? "接続モード：つなぐ2つの四角を順にクリック（同じ組を再クリックで接続解除／「接続」でモード終了）"
-    : "四角＝ドラッグで移動・ダブルクリックで編集／画像は Ctrl+V で貼り付け／背景ドラッグで移動・ホイールで拡大縮小";
+    : "ドラッグ＝範囲選択（複数まとめて移動）／Ctrl+ドラッグ＝画面移動／何もない所をダブルクリックで四角を追加／四角の右下でサイズ変更／画像は Ctrl+V／Ctrl+Z で元に戻す";
   renderNodes();
   renderEdges();
+  renderHeadings();
 }
 
 function renderNodes() {
@@ -1347,10 +1441,20 @@ function renderNodes() {
   for (const n of mmGame.mindmap.nodes) {
     const el = document.createElement("div");
     el.className = "mm-node"
-      + (n.id === mmSel ? " selected" : "")
-      + (n.id === mmConnectFrom ? " connect-src" : "");
+      + (mmSel.has(n.id) ? " selected" : "")
+      + (n.id === mmConnectFrom ? " connect-src" : "")
+      + (n.heading ? " heading" : "");
     el.style.left = n.x + "px";
     el.style.top = n.y + "px";
+    if (n.w) { el.style.width = n.w + "px"; el.style.maxWidth = "none"; }
+    if (n.h) el.style.height = n.h + "px";
+
+    if (n.heading) {
+      const badge = document.createElement("span");
+      badge.className = "mm-node-badge";
+      badge.textContent = "見出し";
+      el.appendChild(badge);
+    }
 
     const del = document.createElement("button");
     del.className = "mm-node-del";
@@ -1362,7 +1466,12 @@ function renderNodes() {
     content.className = "mm-node-content";
     fillNodeContent(content, n);
 
-    el.append(del, content);
+    const rz = document.createElement("div");
+    rz.className = "mm-node-resize";
+    rz.title = "サイズ変更";
+    rz.addEventListener("mousedown", (e) => onResizeStart(e, n, el));
+
+    el.append(del, content, rz);
     el.addEventListener("mousedown", (e) => onNodeMouseDown(e, n));
     content.addEventListener("dblclick", (e) => { e.stopPropagation(); startEditNode(n, content); });
 
@@ -1428,56 +1537,185 @@ function renderEdges() {
   }
 }
 
-// 選択・接続始点のハイライトは要素の再生成なしにクラスだけ切り替える（ダブルクリック検出を壊さないため）
-function mmSetSelected(id) {
-  mmSel = id;
-  for (const [nid, el] of mmNodeEls) el.classList.toggle("selected", nid === id);
+// ---- 見出し一覧（右パネル）----
+function renderHeadings() {
+  const list = document.getElementById("mmHeadingsList");
+  list.innerHTML = "";
+  const heads = mmGame.mindmap.nodes.filter(n => n.heading);
+  if (!heads.length) {
+    const e = document.createElement("div");
+    e.className = "mm-headings-empty";
+    e.textContent = "見出しはありません";
+    list.appendChild(e);
+    return;
+  }
+  for (const n of heads) {
+    const item = document.createElement("div");
+    item.className = "mm-heading-item";
+    const label = (n.text || "").split("\n")[0].trim() || "（無題）";
+    item.textContent = label;
+    item.title = label;
+    item.onclick = () => focusNode(n);
+    list.appendChild(item);
+  }
 }
+
+// 指定ノードを画面中央へ（拡大率は維持）
+function focusNode(n) {
+  const cv = document.getElementById("mmCanvas");
+  const m = mmGame.mindmap;
+  const el = mmNodeEls.get(n.id);
+  const w = el ? el.offsetWidth : (n.w || 120);
+  const h = el ? el.offsetHeight : (n.h || 40);
+  m.panX = cv.clientWidth / 2 - (n.x + w / 2) * m.scale;
+  m.panY = cv.clientHeight / 2 - (n.y + h / 2) * m.scale;
+  save();
+  mmApplyTransform();
+}
+
+// ---- 選択管理（複数選択）----
+function mmUpdateSelClasses() {
+  for (const [nid, el] of mmNodeEls) el.classList.toggle("selected", mmSel.has(nid));
+}
+function mmSelectOnly(id) { mmSel = new Set([id]); mmUpdateSelClasses(); }
+function mmSelectClear() { mmSel = new Set(); mmUpdateSelClasses(); }
 function mmSetConnectFrom(id) {
   mmConnectFrom = id;
   for (const [nid, el] of mmNodeEls) el.classList.toggle("connect-src", nid === id);
 }
 
 function onNodeMouseDown(e, n) {
-  if (e.target.closest("a") || e.target.closest("textarea") || e.target.closest(".mm-node-del")) return;
-  e.stopPropagation(); // 背景パンと分離
+  if (e.target.closest("a") || e.target.closest("textarea")
+    || e.target.closest(".mm-node-del") || e.target.closest(".mm-node-resize")) return;
+  e.stopPropagation(); // 背景の範囲選択・パンと分離
   if (mmConnectMode) { handleConnectClick(n); return; }
-  mmSetSelected(n.id);
-  mmDrag = { n, startX: e.clientX, startY: e.clientY, ox: n.x, oy: n.y, moved: false };
+  // 未選択の四角を掴んだら単独選択に切り替え。選択済みなら選択全体を維持したまま移動。
+  if (!mmSel.has(n.id)) mmSelectOnly(n.id);
+  const moving = mmGame.mindmap.nodes.filter(x => mmSel.has(x.id)).map(x => ({ n: x, ox: x.x, oy: x.y }));
+  mmDrag = { snap: mmSnapshot(), moving, startX: e.clientX, startY: e.clientY, moved: false };
+}
+
+function onResizeStart(e, n, el) {
+  e.stopPropagation();
+  e.preventDefault();
+  mmResize = { n, el, snap: mmSnapshot(), startX: e.clientX, startY: e.clientY,
+    ow: el.offsetWidth, oh: el.offsetHeight, changed: false };
 }
 
 function onMmMouseMove(e) {
   if (!mmGame) return;
-  if (mmDrag) {
-    const s = mmGame.mindmap.scale;
+  const m = mmGame.mindmap;
+  if (mmResize) {
+    const s = m.scale;
+    const nw = Math.max(48, Math.round(mmResize.ow + (e.clientX - mmResize.startX) / s));
+    const nh = Math.max(28, Math.round(mmResize.oh + (e.clientY - mmResize.startY) / s));
+    mmResize.n.w = nw; mmResize.n.h = nh; mmResize.changed = true;
+    mmResize.el.style.width = nw + "px";
+    mmResize.el.style.maxWidth = "none";
+    mmResize.el.style.height = nh + "px";
+    renderEdges();
+  } else if (mmDrag) {
+    const s = m.scale;
     const dx = (e.clientX - mmDrag.startX) / s;
     const dy = (e.clientY - mmDrag.startY) / s;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) mmDrag.moved = true;
-    mmDrag.n.x = Math.round(mmDrag.ox + dx);
-    mmDrag.n.y = Math.round(mmDrag.oy + dy);
-    const el = mmNodeEls.get(mmDrag.n.id);
-    if (el) { el.style.left = mmDrag.n.x + "px"; el.style.top = mmDrag.n.y + "px"; }
+    for (const it of mmDrag.moving) {
+      it.n.x = Math.round(it.ox + dx);
+      it.n.y = Math.round(it.oy + dy);
+      const el = mmNodeEls.get(it.n.id);
+      if (el) { el.style.left = it.n.x + "px"; el.style.top = it.n.y + "px"; }
+    }
     renderEdges();
   } else if (mmPan) {
-    const m = mmGame.mindmap;
     m.panX = mmPan.opx + (e.clientX - mmPan.startX);
     m.panY = mmPan.opy + (e.clientY - mmPan.startY);
     mmApplyTransform();
+  } else if (mmSelecting) {
+    const x = e.clientX - mmSelecting.rect.left;
+    const y = e.clientY - mmSelecting.rect.top;
+    const left = Math.min(x, mmSelecting.x0), top = Math.min(y, mmSelecting.y0);
+    const w = Math.abs(x - mmSelecting.x0), h = Math.abs(y - mmSelecting.y0);
+    mmSelecting.curr = { left, top, w, h };
+    const box = document.getElementById("mmSelectBox");
+    box.style.left = left + "px"; box.style.top = top + "px";
+    box.style.width = w + "px"; box.style.height = h + "px";
   }
 }
 
 function onMmMouseUp() {
-  if (mmDrag) { if (mmDrag.moved) save(); mmDrag = null; }
-  if (mmPan) { document.getElementById("mmCanvas").classList.remove("panning"); mmPan = null; save(); }
+  if (mmResize) {
+    if (mmResize.changed) { mmPushUndo(mmResize.snap); save(); }
+    mmResize = null;
+  }
+  if (mmDrag) {
+    if (mmDrag.moved) { mmPushUndo(mmDrag.snap); save(); renderMindmap(); }
+    mmDrag = null;
+  }
+  if (mmPan) {
+    document.getElementById("mmCanvas").classList.remove("panning");
+    mmPan = null; save();
+  }
+  if (mmSelecting) {
+    const box = document.getElementById("mmSelectBox");
+    box.style.display = "none";
+    const sel = mmSelecting.curr;
+    if (sel && (sel.w > 3 || sel.h > 3)) {
+      const m = mmGame.mindmap;
+      const picked = new Set();
+      for (const nd of m.nodes) {
+        const el = mmNodeEls.get(nd.id);
+        if (!el) continue;
+        const nx = m.panX + nd.x * m.scale, ny = m.panY + nd.y * m.scale;
+        const nw = el.offsetWidth * m.scale, nh = el.offsetHeight * m.scale;
+        // 選択矩形（キャンバス座標）とノードの表示矩形が交差していれば選択
+        if (nx < sel.left + sel.w && nx + nw > sel.left && ny < sel.top + sel.h && ny + nh > sel.top) {
+          picked.add(nd.id);
+        }
+      }
+      mmSel = picked;
+      mmUpdateSelClasses();
+    }
+    mmSelecting = null;
+  }
 }
 
+// 背景での mousedown：Ctrl+ドラッグで画面移動、素のドラッグで範囲選択。
 function onCanvasMouseDown(e) {
   if (!mmGame) return;
-  if (e.target.closest(".mm-node")) return; // ノードは各自で処理
-  mmSetSelected(null);
+  if (e.target.closest(".mm-node") || e.target.closest(".mm-headings")) return;
   const m = mmGame.mindmap;
-  mmPan = { startX: e.clientX, startY: e.clientY, opx: m.panX, opy: m.panY };
-  document.getElementById("mmCanvas").classList.add("panning");
+  if (e.ctrlKey || e.metaKey) {
+    mmPan = { startX: e.clientX, startY: e.clientY, opx: m.panX, opy: m.panY };
+    document.getElementById("mmCanvas").classList.add("panning");
+    return;
+  }
+  // 範囲選択の開始
+  mmSelectClear();
+  const rect = document.getElementById("mmCanvas").getBoundingClientRect();
+  mmSelecting = { rect, x0: e.clientX - rect.left, y0: e.clientY - rect.top, curr: null };
+  const box = document.getElementById("mmSelectBox");
+  box.style.display = "block";
+  box.style.left = mmSelecting.x0 + "px"; box.style.top = mmSelecting.y0 + "px";
+  box.style.width = "0"; box.style.height = "0";
+}
+
+// 何もない所をダブルクリック → その位置に四角を追加
+function onCanvasDblClick(e) {
+  if (!mmGame || mmConnectMode) return;
+  if (e.target.closest(".mm-node") || e.target.closest(".mm-headings")) return;
+  const cv = document.getElementById("mmCanvas");
+  const rect = cv.getBoundingClientRect();
+  const m = mmGame.mindmap;
+  const wx = (e.clientX - rect.left - m.panX) / m.scale;
+  const wy = (e.clientY - rect.top - m.panY) / m.scale;
+  mmPushUndo();
+  const n = { id: mmNewId(), x: Math.round(wx - 60), y: Math.round(wy - 20), text: "", img: "" };
+  m.nodes.push(n);
+  mmSelectOnly(n.id);
+  save();
+  renderMindmap();
+  const content = mmNodeEls.get(n.id)?.querySelector(".mm-node-content");
+  if (content) startEditNode(n, content);
 }
 
 // 画面中央のワールド座標を返す
@@ -1493,22 +1731,38 @@ function mmViewCenterWorld() {
 function addMindmapNode() {
   const m = mmGame.mindmap;
   const c = mmViewCenterWorld();
+  mmPushUndo();
   const n = { id: mmNewId(), x: Math.round(c.x - 60), y: Math.round(c.y - 20), text: "", img: "" };
   m.nodes.push(n);
-  mmSel = n.id;
+  mmSelectOnly(n.id);
   save();
   renderMindmap();
   const content = mmNodeEls.get(n.id)?.querySelector(".mm-node-content");
   if (content) startEditNode(n, content);
 }
 
+// ✕ ボタン：単独削除
 function deleteNode(id) {
+  mmPushUndo();
   const m = mmGame.mindmap;
   m.nodes = m.nodes.filter(n => n.id !== id);
   m.edges = m.edges.filter(e => e.from !== id && e.to !== id);
-  if (mmSel === id) mmSel = null;
+  mmSel.delete(id);
   if (mmConnectFrom === id) mmConnectFrom = null;
   if (mmEditing && mmEditing.id === id) mmEditing = null;
+  save();
+  renderMindmap();
+}
+
+// Delete キー：選択中の四角をまとめて削除
+function deleteSelected() {
+  if (!mmSel.size) return;
+  mmPushUndo();
+  const m = mmGame.mindmap;
+  const ids = mmSel;
+  m.nodes = m.nodes.filter(n => !ids.has(n.id));
+  m.edges = m.edges.filter(e => !ids.has(e.from) && !ids.has(e.to));
+  mmSel = new Set();
   save();
   renderMindmap();
 }
@@ -1516,28 +1770,36 @@ function deleteNode(id) {
 function startEditNode(n, content) {
   if (mmConnectMode) return;
   mmEditing = n;
+  // 編集中も四角のサイズを保つため、現在の中身のサイズで textarea を固定する
+  const w = content.offsetWidth, h = content.offsetHeight;
   content.innerHTML = "";
   const ta = document.createElement("textarea");
   ta.className = "mm-node-edit";
   ta.value = n.text || "";
-  ta.rows = Math.max(2, (n.text || "").split("\n").length);
+  ta.style.width = w + "px";
+  ta.style.height = h + "px";
   ta.addEventListener("mousedown", e => e.stopPropagation()); // 編集中はドラッグさせない
   content.appendChild(ta);
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
 
+  const before = n.text || "";
   const finish = () => {
     if (mmEditing !== n) return;
-    n.text = ta.value;
     mmEditing = null;
-    save();
+    if (ta.value !== before) {
+      mmPushUndo();      // 変更前の状態を記録（この時点で n.text はまだ変更前）
+      n.text = ta.value;
+      save();
+    }
     fillNodeContent(content, n);
     renderEdges();
+    renderHeadings();
   };
   ta.addEventListener("blur", finish);
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ta.blur(); }
-    else if (e.key === "Escape") { e.preventDefault(); ta.value = n.text || ""; ta.blur(); }
+    else if (e.key === "Escape") { e.preventDefault(); ta.value = before; ta.blur(); }
   });
 }
 
@@ -1552,9 +1814,22 @@ function handleConnectClick(n) {
   if (mmConnectFrom === n.id) { mmSetConnectFrom(null); return; }
   const m = mmGame.mindmap;
   const same = (e) => (e.from === mmConnectFrom && e.to === n.id) || (e.from === n.id && e.to === mmConnectFrom);
+  mmPushUndo();
   if (m.edges.some(same)) m.edges = m.edges.filter(e => !same(e)); // 既にあれば解除
   else m.edges.push({ from: mmConnectFrom, to: n.id });
   mmConnectFrom = null;
+  save();
+  renderMindmap();
+}
+
+// 選択中の四角の見出し指定を切り替え（全て見出しなら解除、そうでなければ見出しに）
+function toggleHeading() {
+  if (!mmSel.size) { showToast("四角を選んでから押してください"); return; }
+  const nodes = mmGame.mindmap.nodes.filter(n => mmSel.has(n.id));
+  if (!nodes.length) return;
+  mmPushUndo();
+  const allHead = nodes.every(n => n.heading);
+  for (const n of nodes) n.heading = !allHead;
   save();
   renderMindmap();
 }
@@ -1602,6 +1877,7 @@ function onMmPaste(e) {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result;
+        mmPushUndo();
         if (mmEditing) {
           const target = mmEditing;
           const ae = document.activeElement;
@@ -1658,14 +1934,23 @@ document.getElementById("filterStatus").onchange = e => { filterStatus = e.targe
 document.getElementById("mmBack").onclick = closeMindmap;
 document.getElementById("mmAddNode").onclick = addMindmapNode;
 document.getElementById("mmConnect").onclick = toggleConnectMode;
+document.getElementById("mmHeading").onclick = toggleHeading;
+document.getElementById("mmUndo").onclick = mmUndo;
 document.getElementById("mmFontDown").onclick = () => mmChangeFont(-1);
 document.getElementById("mmFontUp").onclick = () => mmChangeFont(1);
 document.getElementById("mmZoomOut").onclick = () => mmZoom(1 / 1.2);
 document.getElementById("mmZoomIn").onclick = () => mmZoom(1.2);
 document.getElementById("mmZoomReset").onclick = mmZoomReset;
+document.getElementById("mmHeadToggle").onclick = () => {
+  const p = document.getElementById("mmHeadings");
+  p.classList.toggle("collapsed");
+  document.getElementById("mmHeadToggle").textContent = p.classList.contains("collapsed") ? "▶" : "◀";
+};
 document.getElementById("mmCanvas").addEventListener("mousedown", onCanvasMouseDown);
+document.getElementById("mmCanvas").addEventListener("dblclick", onCanvasDblClick);
 document.getElementById("mmCanvas").addEventListener("wheel", (e) => {
   if (!mmGame) return;
+  if (e.target.closest(".mm-headings")) return; // 見出し一覧はそのままスクロール
   e.preventDefault();
   mmZoom(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX, e.clientY);
 }, { passive: false });
@@ -1681,12 +1966,16 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach(o => o.classList.remove("open"));
 });
 
-// マインドマップ画面のキー操作（Esc で戻る、Delete で選択中の四角を削除）
+// マインドマップ画面のキー操作（Ctrl+Z で元に戻す、Esc で戻る、Delete で選択中の四角を削除）
 document.addEventListener("keydown", e => {
   if (!mmGame || !document.getElementById("mindmapScreen").classList.contains("open")) return;
+  if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+    if (mmEditing) return; // 編集中は textarea 自身の取り消しを優先
+    e.preventDefault(); mmUndo(); return;
+  }
   if (mmEditing) return; // 編集中は textarea を優先
   if (e.key === "Escape") { e.preventDefault(); closeMindmap(); }
-  else if ((e.key === "Delete" || e.key === "Backspace") && mmSel) { e.preventDefault(); deleteNode(mmSel); }
+  else if ((e.key === "Delete" || e.key === "Backspace") && mmSel.size) { e.preventDefault(); deleteSelected(); }
 });
 
 render();
