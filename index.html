@@ -82,6 +82,16 @@
     text-overflow: ellipsis;
   }
   td.wrap { white-space: normal; min-width: 160px; }
+  /* メモなど：最大3行まで表示し、超過分は…で省略 */
+  .clamp3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
   thead th {
     position: sticky;
     top: 0;
@@ -458,7 +468,7 @@ const STORAGE_KEY = "game-progress-tracker-v1";
 // 既定の並び順は DEFAULT_ORDER で定義する（title は常に先頭、updatedAt は常に末尾）。
 const FIXED_COLUMNS = [
   { key: "title",        label: "タイトル",            type: "text" },
-  { key: "series",       label: "シリーズ",            type: "text" },
+  { key: "series",       label: "シリーズ",            type: "datalist" },
   { key: "platform",     label: "プラットフォーム",    type: "datalist" },
   { key: "genre",        label: "ジャンル",            type: "datalist" },
   { key: "status",       label: "ステータス",          type: "status" },
@@ -826,8 +836,11 @@ function renderTable(cols, rows) {
         td.textContent = getValue(g, col);
         td.className = "title-cell";
       } else if (col.key === "nextTodo") {
-        td.textContent = getValue(g, col);
         td.className = "wrap muted";
+        const clamp = document.createElement("div");
+        clamp.className = "clamp3";
+        clamp.textContent = getValue(g, col);
+        td.appendChild(clamp);
       } else {
         td.textContent = getValue(g, col);
       }
@@ -1959,9 +1972,20 @@ document.addEventListener("mousemove", onMmMouseMove);
 document.addEventListener("mouseup", onMmMouseUp);
 document.addEventListener("paste", onMmPaste);
 
-// オーバーレイ外クリックで閉じる
+// 追加・編集モーダルは外側クリックで自動保存（タイトル未入力なら破棄して閉じる）
+function saveOrCloseEdit() {
+  const titleInput = document.querySelector('#editFields [data-fkey="title"]');
+  if (titleInput && titleInput.value.trim()) saveEdit();
+  else closeEdit();
+}
+
+// オーバーレイ外クリック：編集モーダルは自動保存、それ以外は閉じる
 for (const ov of document.querySelectorAll(".overlay")) {
-  ov.addEventListener("click", e => { if (e.target === ov) ov.classList.remove("open"); });
+  ov.addEventListener("click", e => {
+    if (e.target !== ov) return;
+    if (ov.id === "editOverlay") saveOrCloseEdit();
+    else ov.classList.remove("open");
+  });
 }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach(o => o.classList.remove("open"));
